@@ -1,126 +1,78 @@
-import SimpleLightbox from 'simplelightbox';
-import 'simplelightbox/dist/simple-lightbox.min.css';
-
-import { FetcherOfImages } from './js/fetchImages';
-
+import './css/style.css';
+import { FetchImagesService } from './js/fetchImagesService';
+import { refs } from './js/getRefs';
+import { LoadMoreBtn } from './js/load-more-btn';
+import { makeImageMarkup } from './js/markupService';
 import { Notify } from 'notiflix/build/notiflix-notify-aio';
-import 'notiflix/dist/notiflix-notify-aio-3.2.6.min.js';
+import SimpleLightbox from "simplelightbox";
+import "simplelightbox/dist/simple-lightbox.min.css";
 
-const searchFormRef = document.querySelector('.search-form');
-const galleryRef = document.querySelector('.gallery');
-const loadMoreBtn = document.querySelector('.load-more');
 
-const observer = new IntersectionObserver(intersectingHandler);
-observer.observe(loadMoreBtn);
+const fetchImagesService = new FetchImagesService();
+const loadMoreBtn = new LoadMoreBtn({ selektor: '.load-more', hidden: true });
+const lightbox = new SimpleLightbox('.gallery a', { captionDelay
+    : 250,
+});
 
-galleryRef.style.display = "flex";
-galleryRef.style.flexWrap = "wrap";
-galleryRef.style.gap = "30px";
 
-searchFormRef.addEventListener('submit', onSubmitForm);
+function onSearch(e) {
+    e.preventDefault();
 
-const fetcherOfImages = new FetcherOfImages();
-const simpleLightbox = initializeSimpleLightbox();
-
-function onSubmitForm(e) {
-  e.preventDefault();
-
-  fetchImages();
-}
-
-async function fetchImages() {
-  const query = searchFormRef.elements.searchQuery.value.trim();
-  if (query === '') {
-    return;
-  }
-  await fetcherOfImages
-    .getImages(query)
-    .then(({ data }) => {
-      if (data.hits.length === 0) {
-        galleryRef.innerHTML = '';
-        return Notify.failure(
-          'Sorry, there are no images matching your search query. Please try again.'
-        );
-      }
-      if (fetcherOfImages.page === 1) {
-        galleryRef.innerHTML = renderGallery(data.hits);
-        Notify.success(`Hooray! We found ${data.totalHits} images.`);
-      } else {
-        galleryRef.insertAdjacentHTML('beforeend', renderGallery(data.hits));
-        setScrollbehavior();
-      }
-    })
-    .catch(error => {
-      if (error.response.status === 400) {
-        Notify.info(
-          "We're sorry, but you've reached the end of search results."
-        );
-      } else {
-        Notify.failure('Something went wrong. Try again!');
-      }
-    });
-  simpleLightbox.refresh();
-}
-
-function initializeSimpleLightbox() {
-  return new SimpleLightbox('.gallery a');
-}
-
-function renderGallery(images) {
-  return images
-    .map(
-      ({
-        webformatURL: preview,
-        largeImageURL: original,
-        tags: description,
-        likes,
-        views,
-        comments,
-        downloads,
-      }) => {
-        return `<div class="photo-card">
-                    <a class="gallery__link" href="${original}">
-                        <img src="${preview}" alt="${description}" loading="lazy" />
-                        <div class="info">
-                            <p class="info-item">
-                            <b>Likes</b>
-                            ${likes}
-                            </p>
-                            <p class="info-item">
-                            <b>Views</b>
-                            ${views}
-                            </p>
-                            <p class="info-item">
-                            <b>Comments</b>
-                            ${comments}
-                            </p>
-                            <p class="info-item">
-                            <b>Downloads</b>
-                            ${downloads}
-                            </p>
-                        </div>
-                    </a>
-                 </div>`;
-      }
-    )
-    .join('');
-}
-
-function setScrollbehavior() {
-  const { height: cardHeight } = document
-    .querySelector('.gallery')
-    .firstElementChild.getBoundingClientRect();
-
-  window.scrollBy({
-    top: cardHeight * 2,
-    behavior: 'smooth',
-  });
-}
-
-function intersectingHandler(entries) {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      fetchImages();
+    const currentWord = e.currentTarget.elements.searchQuery.value.trim();
+    if (currentWord === '') {
+        return Notify.info(`Enter a word to search for images.`);
     }
-  });
+    fetchImagesService.searchQuery = currentWord;
+    loadMoreBtn.show();
+    fetchImagesService.resetPage();
+    clearImageContainer();
+    fetchImages();
 }
+
+function clearImageContainer() {
+    refs.containerDiv.innerHTML = '';
+}
+
+function fetchImages() {
+    loadMoreBtn.disabled();
+    fetchImagesService.fetchImages().then(({data}) => {
+        if (data.total === 0) {
+            Notify.info(`Sorry, there are no images matching your search query: ${fetchImagesService.searchQuery}. Please try again.`);
+            loadMoreBtn.hide();
+            return;
+        }
+        appendImagesMarkup(data);
+        onPageScrolling()
+        lightbox.refresh();
+        const { totalHits } = data;
+
+        if (refs.containerDiv.children.length === totalHits ) {
+            Notify.info(`We're sorry, but you've reached the end of search results.`);
+            loadMoreBtn.hide();
+        } else {
+            loadMoreBtn.enable();
+            Notify.success(`Hooray! We found ${totalHits} images.`);
+        }
+    }).catch(handleError);
+}
+
+function handleError() {
+    console.log('Error!');
+}
+
+function appendImagesMarkup(data) {
+    refs.containerDiv.insertAdjacentHTML('beforeend', makeImageMarkup(data));
+}
+
+//  Плавная прокрутка страницы после запроса и отрисовки каждой следующей группы изображений
+function onPageScrolling(){ 
+    const { height: cardHeight } = refs.containerDiv
+        .firstElementChild.getBoundingClientRect();
+        window.scrollBy({
+        top: cardHeight * 2,
+        behavior: "smooth",
+        });
+}
+
+refs.formSearch.addEventListener('submit', onSearch);
+loadMoreBtn.refs.button.addEventListener('click', fetchImages);
